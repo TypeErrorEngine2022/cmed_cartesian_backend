@@ -12,11 +12,6 @@
             "dest": "dist/index.js"
         }
     ],
-    "functions": {
-        "dist/index.js": {
-            "maxDuration": 10
-        }
-    },
     "env": {
         "NODE_ENV": "production"
     }

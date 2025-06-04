@@ -1,39 +1,41 @@
+import "reflect-metadata";
 import express from "express";
 import { Request, Response, NextFunction } from "express";
-import "reflect-metadata";
 import { AppDataSource } from "./data-source";
 import { Criteria } from "./entity/Criteria";
 import { Formula } from "./entity/Formula";
 import { Attribute } from "./entity/Attribute";
 import cors from "cors";
 import jwt from "jsonwebtoken";
-import cookieParser from "cookie-parser";
-import session from "express-session";
 import dotenv from "dotenv";
 import bcrypt from "bcrypt";
 
 dotenv.config();
 
-// Authentication configuration
-const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
-const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
-
-// Define custom interface for session data
-declare module "express-session" {
-  interface SessionData {
-    user?: { username: string };
-  }
+const requiredEnvVars = [
+  "JWT_SECRET",
+  "ADMIN_PASSWORD_HASH",
+  "DATABASE_URL",
+  "CORS_ORIGIN",
+];
+const missingEnvVars = requiredEnvVars.filter(
+  (varName) => !process.env[varName],
+);
+if (missingEnvVars.length > 0) {
+  throw new Error(
+    `Missing required environment variables: ${missingEnvVars.join(", ")}`,
+  );
 }
 
 const app = express();
-const PORT = process.env.PORT || 3001;
 
-// Create API Router to handle /api prefix for Vercel deployment
-const apiRouter = express.Router();
+const corsOrigins = [];
+if (process.env.CORS_ORIGIN) corsOrigins.push(process.env.CORS_ORIGIN);
+corsOrigins.push("http://localhost:5173");
 
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+    origin: corsOrigins,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true, // Important for cookies/authentication
@@ -47,105 +49,88 @@ app.use((req, res, next) => {
   res.header("Access-Control-Allow-Credentials", "true");
   next();
 });
-app.use(cookieParser());
-app.use(
-  session({
-    secret: JWT_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    },
-  }),
-);
+
+interface UserRequest extends Request {
+  user?: { username: string };
+}
 
 // Authentication middleware
-const authenticate = (req: Request, res: Response, next: NextFunction) => {
-  if (req.session.user) {
-    return next();
-  }
-
+const authenticate = (req: UserRequest, res: Response, next: NextFunction) => {
   const token = req.headers.authorization?.split(" ")[1];
-
   if (!token) {
     return res.status(401).json({ error: "Authentication required" });
   }
-
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { username: string };
-    req.session.user = { username: decoded.username };
+    const decoded = jwt.verify(token, process.env.JWT_SECRET ?? "") as {
+      username: string;
+    };
+    req.user = { username: decoded.username };
     next();
   } catch (error) {
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 };
 
-// Initialize database connection
-AppDataSource.initialize()
-  .then(async () => {
-    console.log("Database connection initialized");
+const apiRouter = express.Router();
+app.use("/api", apiRouter);
 
-    // Run migrations if in production
-    if (process.env.NODE_ENV === "production") {
-      try {
+let isDbInitialized = false;
+async function initializeDb() {
+  if (!isDbInitialized) {
+    try {
+      await AppDataSource.initialize();
+      console.log("Database connection initialized");
+      const entities = AppDataSource.entityMetadatas;
+      console.log(
+        `Registered entities: ${entities.map((e) => e.name).join(", ")}`,
+      );
+      if (process.env.NODE_ENV === "production") {
         const migrations = await AppDataSource.runMigrations();
         console.log(`Ran ${migrations.length} migrations successfully`);
-      } catch (error) {
-        console.error("Error running migrations:", error);
       }
+      isDbInitialized = true;
+    } catch (error) {
+      console.error("Error during database initialization:", error);
+      throw error;
     }
+  }
+}
 
-    // Mount the API router with the / prefix
-    app.use("/", apiRouter);
-
-    // Start the server after database is initialized
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-  })
-  .catch((error) =>
-    console.log("Error during database initialization:", error),
-  );
-
-// Authentication Routes
-apiRouter.post("/auth/login", async (req: Request, res: Response) => {
-  if (!ADMIN_PASSWORD_HASH) {
+apiRouter.post("/auth/login", async (req: UserRequest, res: Response) => {
+  if (!process.env.ADMIN_PASSWORD_HASH) {
     return res.status(500).json({ error: "Admin password not configured" });
   }
 
   const { password } = req.body;
 
-  if (await bcrypt.compare(password, ADMIN_PASSWORD_HASH)) {
-    const token = jwt.sign({ username: "admin" }, JWT_SECRET, {
-      expiresIn: "24h",
-    });
-    req.session.user = { username: "admin" };
+  if (await bcrypt.compare(password, process.env.ADMIN_PASSWORD_HASH)) {
+    const token = jwt.sign(
+      { username: "admin" },
+      process.env.JWT_SECRET ?? "",
+      {
+        expiresIn: "24h",
+      },
+    );
+    req.user = { username: "admin" };
     res.json({ success: true, token, username: "admin" });
   } else {
     res.status(401).json({ error: "Invalid username or password" });
   }
 });
 
-apiRouter.post("/auth/logout", (req: Request, res: Response) => {
-  req.session.destroy((err) => {
-    if (err) {
-      return res.status(500).json({ error: "Failed to logout" });
-    }
-    res.clearCookie("connect.sid");
-    res.json({ success: true });
-  });
-});
-
-apiRouter.get("/auth/verify", authenticate, (req: Request, res: Response) => {
-  res.json({ authenticated: true, username: req.session.user?.username });
-});
+apiRouter.get(
+  "/auth/verify",
+  authenticate,
+  (req: UserRequest, res: Response) => {
+    res.json({ authenticated: true, username: req.user?.username });
+  },
+);
 
 // Protected Routes - Apply authentication middleware
 apiRouter.use(authenticate);
 
 // GET /table: Retrieve table data
-apiRouter.get("/table", async (req: Request, res: Response) => {
+apiRouter.get("/table", async (req: UserRequest, res: Response) => {
   const criteriaRepository = AppDataSource.getRepository(Criteria);
   const formulaRepository = AppDataSource.getRepository(Formula);
 
@@ -169,7 +154,7 @@ apiRouter.get("/table", async (req: Request, res: Response) => {
 });
 
 // POST /column: Add a new column
-apiRouter.post("/column", async (req: Request, res: Response) => {
+apiRouter.post("/column", async (req: UserRequest, res: Response) => {
   const { column_name } = req.body;
   if (!column_name)
     return res.status(400).json({ error: "Criteria name required" });
@@ -194,7 +179,7 @@ apiRouter.post("/column", async (req: Request, res: Response) => {
 });
 
 // POST /row: Add a new row
-apiRouter.post("/row", async (req: Request, res: Response) => {
+apiRouter.post("/row", async (req: UserRequest, res: Response) => {
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: "Formula name required" });
 
@@ -218,7 +203,7 @@ apiRouter.post("/row", async (req: Request, res: Response) => {
 });
 
 // PUT /cell: Update a cell value
-apiRouter.put("/cell", async (req: Request, res: Response) => {
+apiRouter.put("/cell", async (req: UserRequest, res: Response) => {
   const { row_id, column_name, value } = req.body;
 
   const criteriaRepository = AppDataSource.getRepository(Criteria);
@@ -253,7 +238,7 @@ apiRouter.put("/cell", async (req: Request, res: Response) => {
 });
 
 // PUT /annotation: Update a row's annotation
-apiRouter.put("/annotation", async (req: Request, res: Response) => {
+apiRouter.put("/annotation", async (req: UserRequest, res: Response) => {
   const { row_id, annotation } = req.body;
 
   const formulaRepository = AppDataSource.getRepository(Formula);
@@ -269,22 +254,25 @@ apiRouter.put("/annotation", async (req: Request, res: Response) => {
 });
 
 // PUT /row/:row_name: Update the row name of a row
-apiRouter.put("/row/:row_name/name", async (req: Request, res: Response) => {
-  const { row_name } = req.params;
-  const { new_name } = req.body;
-  if (!new_name) return res.status(400).json({ error: "New name required" });
-  const formulaRepository = AppDataSource.getRepository(Formula);
-  const row = await formulaRepository.findOne({
-    where: { name: row_name },
-  });
-  if (!row) return res.status(404).json({ error: "Row not found" });
-  row.name = new_name;
-  await formulaRepository.save(row);
-  res.json({ message: "Row name updated successfully" });
-});
+apiRouter.put(
+  "/row/:row_name/name",
+  async (req: UserRequest, res: Response) => {
+    const { row_name } = req.params;
+    const { new_name } = req.body;
+    if (!new_name) return res.status(400).json({ error: "New name required" });
+    const formulaRepository = AppDataSource.getRepository(Formula);
+    const row = await formulaRepository.findOne({
+      where: { name: row_name },
+    });
+    if (!row) return res.status(404).json({ error: "Row not found" });
+    row.name = new_name;
+    await formulaRepository.save(row);
+    res.json({ message: "Row name updated successfully" });
+  },
+);
 
 // DELETE /row/:row_name: Delete a row (formula) and its associated attributes
-apiRouter.delete("/row/:row_name", async (req: Request, res: Response) => {
+apiRouter.delete("/row/:row_name", async (req: UserRequest, res: Response) => {
   const { row_name } = req.params;
 
   const formulaRepository = AppDataSource.getRepository(Formula);
@@ -316,7 +304,7 @@ apiRouter.delete("/row/:row_name", async (req: Request, res: Response) => {
 // DELETE /column: Delete a column and its associated attributes
 apiRouter.delete(
   "/column/:column_name",
-  async (req: Request, res: Response) => {
+  async (req: UserRequest, res: Response) => {
     const { column_name } = req.params;
 
     const criteriaRepository = AppDataSource.getRepository(Criteria);
@@ -347,7 +335,7 @@ apiRouter.delete(
 );
 
 // Export table data
-apiRouter.get("/export", async (req: Request, res: Response) => {
+apiRouter.get("/export", async (req: UserRequest, res: Response) => {
   try {
     const criteriaRepository = AppDataSource.getRepository(Criteria);
     const formulaRepository = AppDataSource.getRepository(Formula);
@@ -381,7 +369,7 @@ apiRouter.get("/export", async (req: Request, res: Response) => {
 });
 
 // Import table data
-apiRouter.post("/import", async (req: Request, res: Response) => {
+apiRouter.post("/import", async (req: UserRequest, res: Response) => {
   try {
     const { data } = req.body;
 
@@ -477,3 +465,20 @@ apiRouter.post("/import", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to import data" });
   }
 });
+
+export default async function handler(req: UserRequest, res: Response) {
+  await initializeDb(); // Ensure DB is initialized
+  return app(req, res); // Pass UserRequest to Express app
+}
+
+// for local development
+if (process.env.NODE_ENV === "development") {
+  const port = process.env.PORT;
+  initializeDb().catch((error) => {
+    console.error("Failed to initialize database:", error);
+    process.exit(1);
+  });
+  app.listen(port, () => {
+    console.log(`Server is running on http://localhost:${port}`);
+  });
+}

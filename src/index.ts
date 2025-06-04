@@ -466,15 +466,19 @@ apiRouter.post("/import", async (req: UserRequest, res: Response) => {
   }
 });
 
+
+// Initialize DB once at module load time for serverless environments
+let dbInitPromise = initializeDb();
+
 export default async function handler(req: UserRequest, res: Response) {
-  await initializeDb(); // Ensure DB is initialized
+  await dbInitPromise;
   return app(req, res); // Pass UserRequest to Express app
 }
 
 // for local development
 if (process.env.NODE_ENV === "development") {
   const port = process.env.PORT;
-  initializeDb().catch((error) => {
+  dbInitPromise.catch((error) => {
     console.error("Failed to initialize database:", error);
     process.exit(1);
   });

@@ -18,4 +18,12 @@ export const AppDataSource = new DataSource({
   entities: [Formula, Criteria, Attribute],
   subscribers: [],
   migrations: ["src/migration/**/*.ts"],
+  poolSize: 10,
+  connectTimeoutMS: 2000,
+  maxQueryExecutionTime: 1500,
+  extra: {
+    // PG specific options
+    max: 10, // Max connections (same as poolSize, but specifically for pg)
+    idleTimeoutMillis: 30000, // How long a connection can be idle before being released
+  },
 });

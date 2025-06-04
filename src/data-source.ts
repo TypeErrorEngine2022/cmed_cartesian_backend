@@ -19,7 +19,7 @@ export const AppDataSource = new DataSource({
   subscribers: [],
   migrations: ["src/migration/**/*.ts"],
   poolSize: 10,
-  connectTimeoutMS: 2000,
+  connectTimeoutMS: 5000,
   maxQueryExecutionTime: 1500,
   extra: {
     // PG specific options

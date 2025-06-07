@@ -1,7 +1,14 @@
-import { Entity, PrimaryGeneratedColumn, OneToMany, Column } from "typeorm";
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  OneToMany,
+  Column,
+  Index,
+} from "typeorm";
 import { Attribute } from "./Attribute";
 
 @Entity()
+@Index(["name"], { unique: true })
 export class Formula {
   @PrimaryGeneratedColumn()
   id: number;

@@ -3,11 +3,13 @@ import {
   Column,
   PrimaryGeneratedColumn,
   ManyToOne,
-  JoinColumn
+  JoinColumn,
+  Index,
 } from "typeorm";
 import { Formula } from "./Formula";
 
 @Entity()
+@Index(["formula_id", "criteria_id"], { unique: true })
 export class Attribute {
   @PrimaryGeneratedColumn()
   id: number;

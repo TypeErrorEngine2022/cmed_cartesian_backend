@@ -15,7 +15,7 @@ dotenv.config();
 const requiredEnvVars = [
   "JWT_SECRET",
   "ADMIN_PASSWORD_HASH",
-  "DATABASE_URL",
+  "ENV_DATABASE_URL",
   "CORS_ORIGIN",
 ];
 const missingEnvVars = requiredEnvVars.filter(

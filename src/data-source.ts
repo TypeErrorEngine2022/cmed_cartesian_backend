@@ -3,6 +3,7 @@ import { Formula } from "./entity/Formula";
 import { Criteria } from "./entity/Criteria";
 import { Attribute } from "./entity/Attribute";
 import dotenv from "dotenv";
+import { AxisSetting } from "./entity/AxisSetting";
 
 dotenv.config();
 
@@ -15,7 +16,7 @@ export const AppDataSource = new DataSource({
     process.env.NODE_ENV === "production"
       ? { rejectUnauthorized: false }
       : false,
-  entities: [Formula, Criteria, Attribute],
+  entities: [Formula, Criteria, Attribute, AxisSetting],
   subscribers: [],
   migrations: ["src/migration/**/*.ts"],
   poolSize: 10,

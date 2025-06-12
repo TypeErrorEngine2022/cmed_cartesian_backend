@@ -5,6 +5,7 @@ import { AppDataSource } from "./data-source";
 import { Criteria } from "./entity/Criteria";
 import { Formula } from "./entity/Formula";
 import { Attribute } from "./entity/Attribute";
+import { AxisSetting } from "./entity/AxisSetting";
 import cors from "cors";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
@@ -328,6 +329,164 @@ apiRouter.delete(
   },
 );
 
+// POST /axis-settings: Create a new axis setting
+apiRouter.post("/axis-settings", async (req: UserRequest, res: Response) => {
+  const { name, xNegative, xPositive, yNegative, yPositive } = req.body;
+
+  if (!name || !xNegative || !xPositive || !yNegative || !yPositive) {
+    return res.status(400).json({ error: "All axes are required" });
+  }
+
+  const criteriaRepository = AppDataSource.getRepository(Criteria);
+  const axisSettingRepository = AppDataSource.getRepository(AxisSetting);
+
+  try {
+    if (await axisSettingRepository.findOne({ where: { name } })) {
+      return res.status(400).json({ error: "Axis setting already exists" });
+    }
+
+    const xNegativeCriteria = await criteriaRepository.findOne({
+      where: { name: xNegative },
+    });
+    const xPositiveCriteria = await criteriaRepository.findOne({
+      where: { name: xPositive },
+    });
+    const yNegativeCriteria = await criteriaRepository.findOne({
+      where: { name: yNegative },
+    });
+    const yPositiveCriteria = await criteriaRepository.findOne({
+      where: { name: yPositive },
+    });
+
+    if (
+      !xNegativeCriteria ||
+      !xPositiveCriteria ||
+      !yNegativeCriteria ||
+      !yPositiveCriteria
+    ) {
+      return res.status(404).json({ error: "One or more criteria not found" });
+    }
+
+    const axisSetting = new AxisSetting();
+    axisSetting.name = name;
+    axisSetting.xNegative_criteria_id = xNegativeCriteria.id;
+    axisSetting.xPositive_criteria_id = xPositiveCriteria.id;
+    axisSetting.yNegative_criteria_id = yNegativeCriteria.id;
+    axisSetting.yPositive_criteria_id = yPositiveCriteria.id;
+
+    await axisSettingRepository.save(axisSetting);
+    res.json({ message: "Axis settings created successfully" });
+  } catch (error) {
+    console.error("Error creating axis settings:", error);
+    res.status(500).json({ error: "Failed to create axis settings" });
+  }
+});
+
+// GET /axis-settings: Retrieve all axis settings
+apiRouter.get("/axis-settings", async (req: UserRequest, res: Response) => {
+  const axisSettingRepository = AppDataSource.getRepository(AxisSetting);
+  try {
+    const settings = await axisSettingRepository.find({
+      relations: [
+        "xNegativeCriteria",
+        "xPositiveCriteria",
+        "yNegativeCriteria",
+        "yPositiveCriteria",
+      ],
+    });
+    const transformedSettings = settings.map((setting) => ({
+      id: setting.id,
+      name: setting.name,
+      axes: {
+        xNegative: setting.xNegativeCriteria,
+        xPositive: setting.xPositiveCriteria,
+        yNegative: setting.yNegativeCriteria,
+        yPositive: setting.yPositiveCriteria,
+      },
+    }));
+    res.json(transformedSettings);
+  } catch (error) {
+    console.error("Error retrieving axis settings:", error);
+    res.status(500).json({ error: "Failed to retrieve axis settings" });
+  }
+});
+
+// PUT /axis-settings/:id: Update an existing axis setting
+apiRouter.put("/axis-settings/:id", async (req: UserRequest, res: Response) => {
+  const { id } = req.params;
+  const { name, xNegative, xPositive, yNegative, yPositive } = req.body;
+  if (!name || !xNegative || !xPositive || !yNegative || !yPositive) {
+    return res.status(400).json({ error: "All axes are required" });
+  }
+  const criteriaRepository = AppDataSource.getRepository(Criteria);
+  const axisSettingRepository = AppDataSource.getRepository(AxisSetting);
+  try {
+    const xNegativeCriteria = await criteriaRepository.findOne({
+      where: { name: xNegative },
+    });
+    const xPositiveCriteria = await criteriaRepository.findOne({
+      where: { name: xPositive },
+    });
+    const yNegativeCriteria = await criteriaRepository.findOne({
+      where: { name: yNegative },
+    });
+    const yPositiveCriteria = await criteriaRepository.findOne({
+      where: { name: yPositive },
+    });
+
+    if (
+      !xNegativeCriteria ||
+      !xPositiveCriteria ||
+      !yNegativeCriteria ||
+      !yPositiveCriteria
+    ) {
+      return res.status(404).json({ error: "One or more criteria not found" });
+    }
+
+    const setting = await axisSettingRepository.findOne({
+      where: { id: parseInt(id) },
+    });
+
+    if (!setting) {
+      return res.status(404).json({ error: "Axis setting not found" });
+    }
+
+    setting.name = name;
+    setting.xNegative_criteria_id = xNegativeCriteria.id;
+    setting.xPositive_criteria_id = xPositiveCriteria.id;
+    setting.yNegative_criteria_id = yNegativeCriteria.id;
+    setting.yPositive_criteria_id = yPositiveCriteria.id;
+
+    await axisSettingRepository.save(setting);
+    res.json({ message: "Axis settings updated successfully" });
+  } catch (error) {
+    console.error("Error updating axis settings:", error);
+    res.status(500).json({ error: "Failed to update axis settings" });
+  }
+});
+
+// DELETE /axis-settings/:id: Delete an axis setting
+apiRouter.delete(
+  "/axis-settings/:id",
+  async (req: UserRequest, res: Response) => {
+    const { id } = req.params;
+    const axisSettingRepository = AppDataSource.getRepository(AxisSetting);
+    try {
+      const setting = await axisSettingRepository.findOne({
+        where: { id: parseInt(id) },
+      });
+      if (!setting) {
+        return res.status(404).json({ error: "Axis setting not found" });
+      }
+      await axisSettingRepository.remove(setting);
+      res.json({ message: "Axis setting deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting axis setting:", error);
+      res.status(500).json({ error: "Failed to delete axis setting" });
+    }
+  },
+);
+
 // Export table data
 apiRouter.get("/export", async (req: UserRequest, res: Response) => {
   try {
@@ -459,7 +618,6 @@ apiRouter.post("/import", async (req: UserRequest, res: Response) => {
     res.status(500).json({ error: "Failed to import data" });
   }
 });
-
 
 // Initialize DB once at module load time for serverless environments
 let dbInitPromise = initializeDb();

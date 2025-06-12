@@ -14,6 +14,5 @@
     ],
     "env": {
         "NODE_ENV": "production"
-    },
-    "buildCommand": "pnpm run build"
+    }
 }

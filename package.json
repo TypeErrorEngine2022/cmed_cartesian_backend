@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "NODE_ENV=development nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/index.ts",
-    "build": "tsc && pnpm migration:run",
+    "build": "tsc",
     "start": "node dist/index.js",
     "lint": "eslint 'src/**/*.{ts,js}'",
     "format": "prettier --write .",
@@ -29,7 +29,8 @@
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.16.0",
     "reflect-metadata": "^0.2.2",
-    "typeorm": "^0.3.24"
+    "typeorm": "^0.3.24",
+    "ts-node": "^10.9.2"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
@@ -47,7 +48,6 @@
     "eslint-plugin-prettier": "^5.4.1",
     "nodemon": "^3.1.10",
     "prettier": "^3.5.3",
-    "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
   }
 }

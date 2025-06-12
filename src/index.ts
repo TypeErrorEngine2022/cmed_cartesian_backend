@@ -75,14 +75,6 @@ async function initializeDb() {
     try {
       await AppDataSource.initialize();
       console.log("Database connection initialized");
-      const entities = AppDataSource.entityMetadatas;
-      console.log(
-        `Registered entities: ${entities.map((e) => e.name).join(", ")}`,
-      );
-      if (process.env.NODE_ENV === "production") {
-        const migrations = await AppDataSource.runMigrations();
-        console.log(`Ran ${migrations.length} migrations successfully`);
-      }
       isDbInitialized = true;
     } catch (error) {
       console.error("Error during database initialization:", error);

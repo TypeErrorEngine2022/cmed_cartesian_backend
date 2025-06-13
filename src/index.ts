@@ -10,6 +10,7 @@ import cors from "cors";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import bcrypt from "bcrypt";
+import cnchar from "cnchar";
 
 dotenv.config();
 
@@ -122,7 +123,14 @@ apiRouter.get("/table", async (req: UserRequest, res: Response) => {
   const formulaRepository = AppDataSource.getRepository(Formula);
 
   const columns = await criteriaRepository.find();
-  const rows = await formulaRepository.find({ relations: ["attributes"] });
+  const rows = await formulaRepository.find({
+    relations: ["attributes"],
+  });
+
+  rows.sort((a, b) => {
+    const sorted = cnchar.sortSpell([a.name, b.name]) as string[];
+    return sorted[0] === a.name ? -1 : 1;
+  });
 
   const table = {
     columns: columns.map((c: Criteria) => c.name),

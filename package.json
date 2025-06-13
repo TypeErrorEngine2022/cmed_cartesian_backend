@@ -21,6 +21,8 @@
   "license": "ISC",
   "dependencies": {
     "bcrypt": "^6.0.0",
+    "cnchar": "^3.2.6",
+    "cnchar-trad": "^3.2.6",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
@@ -29,8 +31,8 @@
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.16.0",
     "reflect-metadata": "^0.2.2",
-    "typeorm": "^0.3.24",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "typeorm": "^0.3.24"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",

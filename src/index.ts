@@ -133,8 +133,8 @@ apiRouter.get("/table", async (req: UserRequest, res: Response) => {
   });
 
   const table = {
-    columns: columns.map((c: Criteria) => c.name),
-    rows: rows.map((row: Formula) => ({
+    dimensions: columns,
+    dataPoints: rows.map((row: Formula) => ({
       name: row.name,
       annotation: row.annotation,
       attributes: Object.fromEntries(
@@ -331,9 +331,21 @@ apiRouter.delete(
 
 // POST /axis-settings: Create a new axis setting
 apiRouter.post("/axis-settings", async (req: UserRequest, res: Response) => {
-  const { name, xNegative, xPositive, yNegative, yPositive } = req.body;
+  const {
+    name,
+    xNegativeCriteriaId,
+    xPositiveCriteriaId,
+    yNegativeCriteriaId,
+    yPositiveCriteriaId,
+  } = req.body;
 
-  if (!name || !xNegative || !xPositive || !yNegative || !yPositive) {
+  if (
+    !name ||
+    !xNegativeCriteriaId ||
+    !xPositiveCriteriaId ||
+    !yNegativeCriteriaId ||
+    !yPositiveCriteriaId
+  ) {
     return res.status(400).json({ error: "All axes are required" });
   }
 
@@ -345,17 +357,18 @@ apiRouter.post("/axis-settings", async (req: UserRequest, res: Response) => {
       return res.status(400).json({ error: "Axis setting already exists" });
     }
 
+    // Verify that each criteria exists
     const xNegativeCriteria = await criteriaRepository.findOne({
-      where: { name: xNegative },
+      where: { id: xNegativeCriteriaId },
     });
     const xPositiveCriteria = await criteriaRepository.findOne({
-      where: { name: xPositive },
+      where: { id: xPositiveCriteriaId },
     });
     const yNegativeCriteria = await criteriaRepository.findOne({
-      where: { name: yNegative },
+      where: { id: yNegativeCriteriaId },
     });
     const yPositiveCriteria = await criteriaRepository.findOne({
-      where: { name: yPositive },
+      where: { id: yPositiveCriteriaId },
     });
 
     if (
@@ -369,10 +382,10 @@ apiRouter.post("/axis-settings", async (req: UserRequest, res: Response) => {
 
     const axisSetting = new AxisSetting();
     axisSetting.name = name;
-    axisSetting.xNegative_criteria_id = xNegativeCriteria.id;
-    axisSetting.xPositive_criteria_id = xPositiveCriteria.id;
-    axisSetting.yNegative_criteria_id = yNegativeCriteria.id;
-    axisSetting.yPositive_criteria_id = yPositiveCriteria.id;
+    axisSetting.xNegative_criteria_id = xNegativeCriteriaId;
+    axisSetting.xPositive_criteria_id = xPositiveCriteriaId;
+    axisSetting.yNegative_criteria_id = yNegativeCriteriaId;
+    axisSetting.yPositive_criteria_id = yPositiveCriteriaId;
 
     await axisSettingRepository.save(axisSetting);
     res.json({ message: "Axis settings created successfully" });
@@ -397,7 +410,7 @@ apiRouter.get("/axis-settings", async (req: UserRequest, res: Response) => {
     const transformedSettings = settings.map((setting) => ({
       id: setting.id,
       name: setting.name,
-      axes: {
+      settings: {
         xNegative: setting.xNegativeCriteria,
         xPositive: setting.xPositiveCriteria,
         yNegative: setting.yNegativeCriteria,
@@ -411,29 +424,47 @@ apiRouter.get("/axis-settings", async (req: UserRequest, res: Response) => {
   }
 });
 
-// PUT /axis-settings/:id: Update an existing axis setting
-apiRouter.put("/axis-settings/:id", async (req: UserRequest, res: Response) => {
-  const { id } = req.params;
-  const { name, xNegative, xPositive, yNegative, yPositive } = req.body;
-  if (!name || !xNegative || !xPositive || !yNegative || !yPositive) {
+// POST /axis-settings: Create a new axis setting
+apiRouter.post("/axis-settings", async (req: UserRequest, res: Response) => {
+  const {
+    name,
+    xNegativeCriteriaId,
+    xPositiveCriteriaId,
+    yNegativeCriteriaId,
+    yPositiveCriteriaId,
+  } = req.body;
+  if (
+    !name ||
+    !xNegativeCriteriaId ||
+    !xPositiveCriteriaId ||
+    !yNegativeCriteriaId ||
+    !yPositiveCriteriaId
+  ) {
     return res.status(400).json({ error: "All axes are required" });
   }
-  const criteriaRepository = AppDataSource.getRepository(Criteria);
   const axisSettingRepository = AppDataSource.getRepository(AxisSetting);
+  const criteriaRepository = AppDataSource.getRepository(Criteria);
   try {
+    // Check if an axis setting with the same name already exists
+    const existingSetting = await axisSettingRepository.findOne({
+      where: { name },
+    });
+    if (existingSetting) {
+      return res.status(400).json({ error: "Axis setting already exists" });
+    }
+    // Verify that each criteria exists
     const xNegativeCriteria = await criteriaRepository.findOne({
-      where: { name: xNegative },
+      where: { id: xNegativeCriteriaId },
     });
     const xPositiveCriteria = await criteriaRepository.findOne({
-      where: { name: xPositive },
+      where: { id: xPositiveCriteriaId },
     });
     const yNegativeCriteria = await criteriaRepository.findOne({
-      where: { name: yNegative },
+      where: { id: yNegativeCriteriaId },
     });
     const yPositiveCriteria = await criteriaRepository.findOne({
-      where: { name: yPositive },
+      where: { id: yPositiveCriteriaId },
     });
-
     if (
       !xNegativeCriteria ||
       !xPositiveCriteria ||
@@ -442,7 +473,52 @@ apiRouter.put("/axis-settings/:id", async (req: UserRequest, res: Response) => {
     ) {
       return res.status(404).json({ error: "One or more criteria not found" });
     }
+    const axisSetting = new AxisSetting();
+    axisSetting.name = name;
+    axisSetting.xNegative_criteria_id = xNegativeCriteriaId;
+    axisSetting.xPositive_criteria_id = xPositiveCriteriaId;
+    axisSetting.yNegative_criteria_id = yNegativeCriteriaId;
+    axisSetting.yPositive_criteria_id = yPositiveCriteriaId;
+    await axisSettingRepository.save(axisSetting);
+    res.json({
+      id: axisSetting.id,
+      name: axisSetting.name,
+      settings: {
+        xNegative: xNegativeCriteria,
+        xPositive: xPositiveCriteria,
+        yNegative: yNegativeCriteria,
+        yPositive: yPositiveCriteria,
+      },
+    });
+  } catch (error) {
+    console.error("Error creating axis settings:", error);
+    res.status(500).json({ error: "Failed to create axis settings" });
+  }
+});
 
+// PUT /axis-settings/:id: Update an existing axis setting
+apiRouter.put("/axis-settings/:id", async (req: UserRequest, res: Response) => {
+  const { id } = req.params;
+  const {
+    name,
+    xNegativeCriteriaId,
+    xPositiveCriteriaId,
+    yNegativeCriteriaId,
+    yPositiveCriteriaId,
+  } = req.body;
+
+  if (
+    !name ||
+    !xNegativeCriteriaId ||
+    !xPositiveCriteriaId ||
+    !yNegativeCriteriaId ||
+    !yPositiveCriteriaId
+  ) {
+    return res.status(400).json({ error: "All axes are required" });
+  }
+
+  const axisSettingRepository = AppDataSource.getRepository(AxisSetting);
+  try {
     const setting = await axisSettingRepository.findOne({
       where: { id: parseInt(id) },
     });
@@ -452,13 +528,34 @@ apiRouter.put("/axis-settings/:id", async (req: UserRequest, res: Response) => {
     }
 
     setting.name = name;
-    setting.xNegative_criteria_id = xNegativeCriteria.id;
-    setting.xPositive_criteria_id = xPositiveCriteria.id;
-    setting.yNegative_criteria_id = yNegativeCriteria.id;
-    setting.yPositive_criteria_id = yPositiveCriteria.id;
-
+    setting.xNegative_criteria_id = xNegativeCriteriaId;
+    setting.xPositive_criteria_id = xPositiveCriteriaId;
+    setting.yNegative_criteria_id = yNegativeCriteriaId;
+    setting.yPositive_criteria_id = yPositiveCriteriaId;
     await axisSettingRepository.save(setting);
-    res.json({ message: "Axis settings updated successfully" });
+    // retrieve the updated setting with relations
+    const updatedSetting = await axisSettingRepository.findOne({
+      where: { id: parseInt(id) },
+      relations: [
+        "xNegativeCriteria",
+        "xPositiveCriteria",
+        "yNegativeCriteria",
+        "yPositiveCriteria",
+      ],
+    });
+    if (!updatedSetting) {
+      return res.status(404).json({ error: "Axis setting not found" });
+    }
+    res.json({
+      id: updatedSetting.id,
+      name: updatedSetting.name,
+      settings: {
+        xNegative: updatedSetting.xNegativeCriteria,
+        xPositive: updatedSetting.xPositiveCriteria,
+        yNegative: updatedSetting.yNegativeCriteria,
+        yPositive: updatedSetting.yPositiveCriteria,
+      },
+    });
   } catch (error) {
     console.error("Error updating axis settings:", error);
     res.status(500).json({ error: "Failed to update axis settings" });

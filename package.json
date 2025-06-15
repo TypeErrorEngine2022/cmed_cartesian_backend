@@ -4,7 +4,7 @@
   "description": "",
   "main": "dist/index.js",
   "engines": {
-    "node": "20.x"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "NODE_ENV=development nodemon --watch 'src/**/*.ts' --exec 'ts-node' src/index.ts",
@@ -12,6 +12,7 @@
     "start": "node dist/index.js",
     "lint": "eslint 'src/**/*.{ts,js}'",
     "format": "prettier --write .",
+    "migration:generate": "ts-node ./node_modules/typeorm/cli.js migration:generate -d src/data-source.ts ",
     "migration:run": "ts-node ./node_modules/typeorm/cli.js migration:run -d src/data-source.ts",
     "migration:revert": "ts-node ./node_modules/typeorm/cli.js migration:revert -d src/data-source.ts"
   },
@@ -20,6 +21,8 @@
   "license": "ISC",
   "dependencies": {
     "bcrypt": "^6.0.0",
+    "cnchar": "^3.2.6",
+    "cnchar-trad": "^3.2.6",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
@@ -28,6 +31,7 @@
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.16.0",
     "reflect-metadata": "^0.2.2",
+    "ts-node": "^10.9.2",
     "typeorm": "^0.3.24"
   },
   "devDependencies": {
@@ -46,7 +50,6 @@
     "eslint-plugin-prettier": "^5.4.1",
     "nodemon": "^3.1.10",
     "prettier": "^3.5.3",
-    "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
   }
 }

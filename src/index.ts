@@ -5,17 +5,19 @@ import { AppDataSource } from "./data-source";
 import { Criteria } from "./entity/Criteria";
 import { Formula } from "./entity/Formula";
 import { Attribute } from "./entity/Attribute";
+import { AxisSetting } from "./entity/AxisSetting";
 import cors from "cors";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
 import bcrypt from "bcrypt";
+import cnchar from "cnchar";
 
 dotenv.config();
 
 const requiredEnvVars = [
   "JWT_SECRET",
   "ADMIN_PASSWORD_HASH",
-  "DATABASE_URL",
+  "ENV_DATABASE_URL",
   "CORS_ORIGIN",
 ];
 const missingEnvVars = requiredEnvVars.filter(
@@ -43,12 +45,6 @@ app.use(
 );
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// Set CORS headers on all responses to handle preflight requests properly
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Credentials", "true");
-  next();
-});
 
 interface UserRequest extends Request {
   user?: { username: string };
@@ -80,14 +76,6 @@ async function initializeDb() {
     try {
       await AppDataSource.initialize();
       console.log("Database connection initialized");
-      const entities = AppDataSource.entityMetadatas;
-      console.log(
-        `Registered entities: ${entities.map((e) => e.name).join(", ")}`,
-      );
-      if (process.env.NODE_ENV === "production") {
-        const migrations = await AppDataSource.runMigrations();
-        console.log(`Ran ${migrations.length} migrations successfully`);
-      }
       isDbInitialized = true;
     } catch (error) {
       console.error("Error during database initialization:", error);
@@ -135,11 +123,18 @@ apiRouter.get("/table", async (req: UserRequest, res: Response) => {
   const formulaRepository = AppDataSource.getRepository(Formula);
 
   const columns = await criteriaRepository.find();
-  const rows = await formulaRepository.find({ relations: ["attributes"] });
+  const rows = await formulaRepository.find({
+    relations: ["attributes"],
+  });
+
+  rows.sort((a, b) => {
+    const sorted = cnchar.sortSpell([a.name, b.name]) as string[];
+    return sorted[0] === a.name ? -1 : 1;
+  });
 
   const table = {
-    columns: columns.map((c: Criteria) => c.name),
-    rows: rows.map((row: Formula) => ({
+    dimensions: columns,
+    dataPoints: rows.map((row: Formula) => ({
       name: row.name,
       annotation: row.annotation,
       attributes: Object.fromEntries(
@@ -172,7 +167,6 @@ apiRouter.post("/column", async (req: UserRequest, res: Response) => {
     const attr = new Attribute();
     attr.formula_id = row.id;
     attr.criteria_id = column.id;
-    attr.value = "NA";
     await attributeRepository.save(attr);
   }
   res.json({ message: "Criteria added" });
@@ -196,7 +190,7 @@ apiRouter.post("/row", async (req: UserRequest, res: Response) => {
     const attr = new Attribute();
     attr.formula_id = row.id;
     attr.criteria_id = col.id;
-    attr.value = "NA";
+    // No need to set value explicitly, TypeORM will use the default value from the entity
     await attributeRepository.save(attr);
   }
   res.json({ message: "Formula added" });
@@ -218,12 +212,17 @@ apiRouter.put("/cell", async (req: UserRequest, res: Response) => {
   if (!row || !column)
     return res.status(404).json({ error: "Formula or column not found" });
 
+  const numericValue = typeof value === "number" ? value : parseInt(value);
+  if (isNaN(numericValue)) {
+    return res.status(400).json({ error: "Invalid value provided" });
+  }
+
   const attr = await attributeRepository.findOne({
     where: { formula_id: row.id, criteria_id: column.id },
   });
 
   if (attr) {
-    attr.value = value || "NA";
+    attr.value = value;
     await attributeRepository.save(attr);
     res.json({ message: "Cell updated" });
   } else {
@@ -308,28 +307,306 @@ apiRouter.delete(
     const { column_name } = req.params;
 
     const criteriaRepository = AppDataSource.getRepository(Criteria);
-    const attributeRepository = AppDataSource.getRepository(Attribute);
-
-    // Find the column (criteria)
-    const column = await criteriaRepository.findOne({
-      where: { name: column_name },
-    });
-
-    if (!column) {
-      return res.status(404).json({ error: "Column not found" });
-    }
 
     try {
-      // First, delete all attributes associated with this column
-      await attributeRepository.delete({ criteria_id: column.id });
+      // Find the column (criteria) with a single query
+      const column = await criteriaRepository.findOne({
+        where: { name: column_name },
+      });
 
-      // Then delete the column itself
-      await criteriaRepository.remove(column);
+      if (!column) {
+        return res.status(404).json({ error: "Column not found" });
+      }
+
+      // Check if the column is used in any axis settings with a single query
+      const axisSettingRepository = AppDataSource.getRepository(AxisSetting);
+      const axisSettings = await axisSettingRepository.find({
+        where: [
+          { xNegative_criteria_id: column.id },
+          { xPositive_criteria_id: column.id },
+          { yNegative_criteria_id: column.id },
+          { yPositive_criteria_id: column.id },
+        ],
+        select: ["id", "name"], // Only select what we need
+      });
+
+      if (axisSettings.length > 0) {
+        return res.status(400).json({
+          error: `此欄位已被${axisSettings.map((setting) => setting.name)}使用，請先移除相關Tab`,
+        });
+      }
+
+      // Use a transaction to ensure data consistency while deleting related records
+      await AppDataSource.transaction(async (transactionalEntityManager) => {
+        // First, delete all attributes associated with this column
+        // (Using the transaction manager)
+        await transactionalEntityManager
+          .getRepository(Attribute)
+          .delete({ criteria_id: column.id });
+
+        // Then delete the column itself
+        await transactionalEntityManager.getRepository(Criteria).remove(column);
+      });
 
       res.json({ message: "Column deleted successfully" });
     } catch (error) {
       console.error("Error deleting column:", error);
       res.status(500).json({ error: "Failed to delete column" });
+    }
+  },
+);
+
+// POST /axis-settings: Create a new axis setting
+apiRouter.post("/axis-settings", async (req: UserRequest, res: Response) => {
+  const {
+    name,
+    xNegativeCriteriaId,
+    xPositiveCriteriaId,
+    yNegativeCriteriaId,
+    yPositiveCriteriaId,
+  } = req.body;
+
+  if (
+    !name ||
+    !xNegativeCriteriaId ||
+    !xPositiveCriteriaId ||
+    !yNegativeCriteriaId ||
+    !yPositiveCriteriaId
+  ) {
+    return res.status(400).json({ error: "All axes are required" });
+  }
+
+  const criteriaRepository = AppDataSource.getRepository(Criteria);
+  const axisSettingRepository = AppDataSource.getRepository(AxisSetting);
+
+  try {
+    if (await axisSettingRepository.findOne({ where: { name } })) {
+      return res.status(400).json({ error: "Axis setting already exists" });
+    }
+
+    // Verify that each criteria exists
+    const xNegativeCriteria = await criteriaRepository.findOne({
+      where: { id: xNegativeCriteriaId },
+    });
+    const xPositiveCriteria = await criteriaRepository.findOne({
+      where: { id: xPositiveCriteriaId },
+    });
+    const yNegativeCriteria = await criteriaRepository.findOne({
+      where: { id: yNegativeCriteriaId },
+    });
+    const yPositiveCriteria = await criteriaRepository.findOne({
+      where: { id: yPositiveCriteriaId },
+    });
+
+    if (
+      !xNegativeCriteria ||
+      !xPositiveCriteria ||
+      !yNegativeCriteria ||
+      !yPositiveCriteria
+    ) {
+      return res.status(404).json({ error: "One or more criteria not found" });
+    }
+
+    const axisSetting = new AxisSetting();
+    axisSetting.name = name;
+    axisSetting.xNegative_criteria_id = xNegativeCriteriaId;
+    axisSetting.xPositive_criteria_id = xPositiveCriteriaId;
+    axisSetting.yNegative_criteria_id = yNegativeCriteriaId;
+    axisSetting.yPositive_criteria_id = yPositiveCriteriaId;
+
+    await axisSettingRepository.save(axisSetting);
+    res.json({ message: "Axis settings created successfully" });
+  } catch (error) {
+    console.error("Error creating axis settings:", error);
+    res.status(500).json({ error: "Failed to create axis settings" });
+  }
+});
+
+// GET /axis-settings: Retrieve all axis settings
+apiRouter.get("/axis-settings", async (req: UserRequest, res: Response) => {
+  const axisSettingRepository = AppDataSource.getRepository(AxisSetting);
+  try {
+    const settings = await axisSettingRepository.find({
+      relations: [
+        "xNegativeCriteria",
+        "xPositiveCriteria",
+        "yNegativeCriteria",
+        "yPositiveCriteria",
+      ],
+    });
+    const transformedSettings = settings.map((setting) => ({
+      id: setting.id,
+      name: setting.name,
+      settings: {
+        xNegative: setting.xNegativeCriteria,
+        xPositive: setting.xPositiveCriteria,
+        yNegative: setting.yNegativeCriteria,
+        yPositive: setting.yPositiveCriteria,
+      },
+    }));
+    res.json(transformedSettings);
+  } catch (error) {
+    console.error("Error retrieving axis settings:", error);
+    res.status(500).json({ error: "Failed to retrieve axis settings" });
+  }
+});
+
+// POST /axis-settings: Create a new axis setting
+apiRouter.post("/axis-settings", async (req: UserRequest, res: Response) => {
+  const {
+    name,
+    xNegativeCriteriaId,
+    xPositiveCriteriaId,
+    yNegativeCriteriaId,
+    yPositiveCriteriaId,
+  } = req.body;
+  if (
+    !name ||
+    !xNegativeCriteriaId ||
+    !xPositiveCriteriaId ||
+    !yNegativeCriteriaId ||
+    !yPositiveCriteriaId
+  ) {
+    return res.status(400).json({ error: "All axes are required" });
+  }
+  const axisSettingRepository = AppDataSource.getRepository(AxisSetting);
+  const criteriaRepository = AppDataSource.getRepository(Criteria);
+  try {
+    // Check if an axis setting with the same name already exists
+    const existingSetting = await axisSettingRepository.findOne({
+      where: { name },
+    });
+    if (existingSetting) {
+      return res.status(400).json({ error: "Axis setting already exists" });
+    }
+    // Verify that each criteria exists
+    const xNegativeCriteria = await criteriaRepository.findOne({
+      where: { id: xNegativeCriteriaId },
+    });
+    const xPositiveCriteria = await criteriaRepository.findOne({
+      where: { id: xPositiveCriteriaId },
+    });
+    const yNegativeCriteria = await criteriaRepository.findOne({
+      where: { id: yNegativeCriteriaId },
+    });
+    const yPositiveCriteria = await criteriaRepository.findOne({
+      where: { id: yPositiveCriteriaId },
+    });
+    if (
+      !xNegativeCriteria ||
+      !xPositiveCriteria ||
+      !yNegativeCriteria ||
+      !yPositiveCriteria
+    ) {
+      return res.status(404).json({ error: "One or more criteria not found" });
+    }
+    const axisSetting = new AxisSetting();
+    axisSetting.name = name;
+    axisSetting.xNegative_criteria_id = xNegativeCriteriaId;
+    axisSetting.xPositive_criteria_id = xPositiveCriteriaId;
+    axisSetting.yNegative_criteria_id = yNegativeCriteriaId;
+    axisSetting.yPositive_criteria_id = yPositiveCriteriaId;
+    await axisSettingRepository.save(axisSetting);
+    res.json({
+      id: axisSetting.id,
+      name: axisSetting.name,
+      settings: {
+        xNegative: xNegativeCriteria,
+        xPositive: xPositiveCriteria,
+        yNegative: yNegativeCriteria,
+        yPositive: yPositiveCriteria,
+      },
+    });
+  } catch (error) {
+    console.error("Error creating axis settings:", error);
+    res.status(500).json({ error: "Failed to create axis settings" });
+  }
+});
+
+// PUT /axis-settings/:id: Update an existing axis setting
+apiRouter.put("/axis-settings/:id", async (req: UserRequest, res: Response) => {
+  const { id } = req.params;
+  const {
+    name,
+    xNegativeCriteriaId,
+    xPositiveCriteriaId,
+    yNegativeCriteriaId,
+    yPositiveCriteriaId,
+  } = req.body;
+
+  if (
+    !name ||
+    !xNegativeCriteriaId ||
+    !xPositiveCriteriaId ||
+    !yNegativeCriteriaId ||
+    !yPositiveCriteriaId
+  ) {
+    return res.status(400).json({ error: "All axes are required" });
+  }
+
+  const axisSettingRepository = AppDataSource.getRepository(AxisSetting);
+  try {
+    const setting = await axisSettingRepository.findOne({
+      where: { id: parseInt(id) },
+    });
+
+    if (!setting) {
+      return res.status(404).json({ error: "Axis setting not found" });
+    }
+
+    setting.name = name;
+    setting.xNegative_criteria_id = xNegativeCriteriaId;
+    setting.xPositive_criteria_id = xPositiveCriteriaId;
+    setting.yNegative_criteria_id = yNegativeCriteriaId;
+    setting.yPositive_criteria_id = yPositiveCriteriaId;
+    await axisSettingRepository.save(setting);
+    // retrieve the updated setting with relations
+    const updatedSetting = await axisSettingRepository.findOne({
+      where: { id: parseInt(id) },
+      relations: [
+        "xNegativeCriteria",
+        "xPositiveCriteria",
+        "yNegativeCriteria",
+        "yPositiveCriteria",
+      ],
+    });
+    if (!updatedSetting) {
+      return res.status(404).json({ error: "Axis setting not found" });
+    }
+    res.json({
+      id: updatedSetting.id,
+      name: updatedSetting.name,
+      settings: {
+        xNegative: updatedSetting.xNegativeCriteria,
+        xPositive: updatedSetting.xPositiveCriteria,
+        yNegative: updatedSetting.yNegativeCriteria,
+        yPositive: updatedSetting.yPositiveCriteria,
+      },
+    });
+  } catch (error) {
+    console.error("Error updating axis settings:", error);
+    res.status(500).json({ error: "Failed to update axis settings" });
+  }
+});
+
+// DELETE /axis-settings/:id: Delete an axis setting
+apiRouter.delete(
+  "/axis-settings/:id",
+  async (req: UserRequest, res: Response) => {
+    const { id } = req.params;
+    const axisSettingRepository = AppDataSource.getRepository(AxisSetting);
+    try {
+      const setting = await axisSettingRepository.findOne({
+        where: { id: parseInt(id) },
+      });
+      if (!setting) {
+        return res.status(404).json({ error: "Axis setting not found" });
+      }
+      await axisSettingRepository.remove(setting);
+      res.json({ message: "Axis setting deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting axis setting:", error);
+      res.status(500).json({ error: "Failed to delete axis setting" });
     }
   },
 );
@@ -445,14 +722,20 @@ apiRouter.post("/import", async (req: UserRequest, res: Response) => {
 
           if (existingAttr) {
             // Update existing attribute
-            existingAttr.value = value as string;
+            existingAttr.value =
+              typeof value === "number"
+                ? value
+                : parseInt(value as string) || 0;
             await attributeRepository.save(existingAttr);
           } else {
             // Create new attribute
             const newAttr = new Attribute();
             newAttr.formula_id = row.id;
             newAttr.criteria_id = column.id;
-            newAttr.value = value as string;
+            newAttr.value =
+              typeof value === "number"
+                ? value
+                : parseInt(value as string) || 0;
             await attributeRepository.save(newAttr);
           }
         }
@@ -465,7 +748,6 @@ apiRouter.post("/import", async (req: UserRequest, res: Response) => {
     res.status(500).json({ error: "Failed to import data" });
   }
 });
-
 
 // Initialize DB once at module load time for serverless environments
 let dbInitPromise = initializeDb();

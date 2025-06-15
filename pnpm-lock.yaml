@@ -11,6 +11,12 @@ importers:
       bcrypt:
         specifier: ^6.0.0
         version: 6.0.0
+      cnchar:
+        specifier: ^3.2.6
+        version: 3.2.6
+      cnchar-trad:
+        specifier: ^3.2.6
+        version: 3.2.6
       cookie-parser:
         specifier: ^1.4.7
         version: 1.4.7
@@ -35,6 +41,9 @@ importers:
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
+      ts-node:
+        specifier: ^10.9.2
+        version: 10.9.2(@types/node@22.15.29)(typescript@5.8.3)
       typeorm:
         specifier: ^0.3.24
         version: 0.3.24(mysql2@3.14.1)(pg@8.16.0)(reflect-metadata@0.2.2)(ts-node@10.9.2(@types/node@22.15.29)(typescript@5.8.3))
@@ -84,9 +93,6 @@ importers:
       prettier:
         specifier: ^3.5.3
         version: 3.5.3
-      ts-node:
-        specifier: ^10.9.2
-        version: 10.9.2(@types/node@22.15.29)(typescript@5.8.3)
       typescript:
         specifier: ^5.8.3
         version: 5.8.3
@@ -446,6 +452,15 @@ packages:
   cliui@8.0.1:
     resolution: {integrity: sha512-BSeNnyus75C4//NQ9gQt1/csTXyo/8Sb+afLAkzAptFuMsod9HFokGNudZpi/oQV73hnVK+sR+5PVRMd+Dr7YQ==}
     engines: {node: '>=12'}
+
+  cnchar-trad@3.2.6:
+    resolution: {integrity: sha512-xdQUwd+W7j4i4vD1c6ykgwuzNExBZrakrmi/5c6ODclyGgEb7QcBKGta7v9WewNhauLHUkTpeMR4AERoBhs3NQ==}
+
+  cnchar-types@3.2.6:
+    resolution: {integrity: sha512-LGU2ss7KcsI1Psme73+jffUX0ZDuChr6P9Rj2j8lynJHStklNpoC/+kheKSSUcXQ1u2KNvZt1Shs/5efcihHkg==}
+
+  cnchar@3.2.6:
+    resolution: {integrity: sha512-7Up5ALAkoOTAHlRMN0B7VgrrRsp6+trgFV0M7xSsZ0TwnnBfW68gXClcE9Oz8sTOEu+zqGOZjBhlHNzPIBckDA==}
 
   color-convert@2.0.1:
     resolution: {integrity: sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ==}
@@ -1890,6 +1905,16 @@ snapshots:
       string-width: 4.2.3
       strip-ansi: 6.0.1
       wrap-ansi: 7.0.0
+
+  cnchar-trad@3.2.6:
+    dependencies:
+      cnchar-types: 3.2.6
+
+  cnchar-types@3.2.6: {}
+
+  cnchar@3.2.6:
+    dependencies:
+      cnchar-types: 3.2.6
 
   color-convert@2.0.1:
     dependencies:

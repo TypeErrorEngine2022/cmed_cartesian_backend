@@ -167,7 +167,6 @@ apiRouter.post("/column", async (req: UserRequest, res: Response) => {
     const attr = new Attribute();
     attr.formula_id = row.id;
     attr.criteria_id = column.id;
-    attr.value = "NA";
     await attributeRepository.save(attr);
   }
   res.json({ message: "Criteria added" });
@@ -191,7 +190,7 @@ apiRouter.post("/row", async (req: UserRequest, res: Response) => {
     const attr = new Attribute();
     attr.formula_id = row.id;
     attr.criteria_id = col.id;
-    attr.value = "NA";
+    // No need to set value explicitly, TypeORM will use the default value from the entity
     await attributeRepository.save(attr);
   }
   res.json({ message: "Formula added" });
@@ -213,12 +212,17 @@ apiRouter.put("/cell", async (req: UserRequest, res: Response) => {
   if (!row || !column)
     return res.status(404).json({ error: "Formula or column not found" });
 
+  const numericValue = typeof value === "number" ? value : parseInt(value);
+  if (isNaN(numericValue)) {
+    return res.status(400).json({ error: "Invalid value provided" });
+  }
+
   const attr = await attributeRepository.findOne({
     where: { formula_id: row.id, criteria_id: column.id },
   });
 
   if (attr) {
-    attr.value = value || "NA";
+    attr.value = value;
     await attributeRepository.save(attr);
     res.json({ message: "Cell updated" });
   } else {
@@ -303,23 +307,46 @@ apiRouter.delete(
     const { column_name } = req.params;
 
     const criteriaRepository = AppDataSource.getRepository(Criteria);
-    const attributeRepository = AppDataSource.getRepository(Attribute);
-
-    // Find the column (criteria)
-    const column = await criteriaRepository.findOne({
-      where: { name: column_name },
-    });
-
-    if (!column) {
-      return res.status(404).json({ error: "Column not found" });
-    }
 
     try {
-      // First, delete all attributes associated with this column
-      await attributeRepository.delete({ criteria_id: column.id });
+      // Find the column (criteria) with a single query
+      const column = await criteriaRepository.findOne({
+        where: { name: column_name },
+      });
 
-      // Then delete the column itself
-      await criteriaRepository.remove(column);
+      if (!column) {
+        return res.status(404).json({ error: "Column not found" });
+      }
+
+      // Check if the column is used in any axis settings with a single query
+      const axisSettingRepository = AppDataSource.getRepository(AxisSetting);
+      const axisSettings = await axisSettingRepository.find({
+        where: [
+          { xNegative_criteria_id: column.id },
+          { xPositive_criteria_id: column.id },
+          { yNegative_criteria_id: column.id },
+          { yPositive_criteria_id: column.id },
+        ],
+        select: ["id", "name"], // Only select what we need
+      });
+
+      if (axisSettings.length > 0) {
+        return res.status(400).json({
+          error: `此欄位已被${axisSettings.map((setting) => setting.name)}使用，請先移除相關Tab`,
+        });
+      }
+
+      // Use a transaction to ensure data consistency while deleting related records
+      await AppDataSource.transaction(async (transactionalEntityManager) => {
+        // First, delete all attributes associated with this column
+        // (Using the transaction manager)
+        await transactionalEntityManager
+          .getRepository(Attribute)
+          .delete({ criteria_id: column.id });
+
+        // Then delete the column itself
+        await transactionalEntityManager.getRepository(Criteria).remove(column);
+      });
 
       res.json({ message: "Column deleted successfully" });
     } catch (error) {
@@ -695,14 +722,20 @@ apiRouter.post("/import", async (req: UserRequest, res: Response) => {
 
           if (existingAttr) {
             // Update existing attribute
-            existingAttr.value = value as string;
+            existingAttr.value =
+              typeof value === "number"
+                ? value
+                : parseInt(value as string) || 0;
             await attributeRepository.save(existingAttr);
           } else {
             // Create new attribute
             const newAttr = new Attribute();
             newAttr.formula_id = row.id;
             newAttr.criteria_id = column.id;
-            newAttr.value = value as string;
+            newAttr.value =
+              typeof value === "number"
+                ? value
+                : parseInt(value as string) || 0;
             await attributeRepository.save(newAttr);
           }
         }

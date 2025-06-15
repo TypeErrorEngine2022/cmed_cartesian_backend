@@ -24,6 +24,6 @@ export class Attribute {
   @Column()
   criteria_id: number;
 
-  @Column({ default: "NA" })
-  value: string;
+  @Column({ type: 'int', default: 0 })
+  value: number;
 }
